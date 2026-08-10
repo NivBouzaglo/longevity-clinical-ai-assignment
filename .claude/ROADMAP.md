@@ -144,23 +144,60 @@ not the LibreChat UI. Doing this before LibreChat wiring de-risks the highest-
 signal deliverable and gives you a way to sanity-check tool behavior without
 fighting Docker.
 
-- [ ] Write `evals/harness.py`: a loop that, for each case in `evals/cases.jsonl`,
+- [x] Write `evals/harness.py`: a loop that, for each case in `evals/cases.jsonl`,
   sends the `question` to an OpenAI-compatible chat model (OpenRouter) with the
   MCP tools attached (or a small client against the running MCP server), captures
   the tool-call trace + final answer
-- [ ] Scorer 1 — **tool-call correctness**: called tool == `expected_tool`, arg
+- [x] Scorer 1 — **tool-call correctness**: called tool == `expected_tool`, arg
   `patient_id` matches (skip when `expected_tool` is `any`/`none`)
-- [ ] Scorer 2 — **numeric/band faithfulness**: for `expected_facts` of kind
+- [x] Scorer 2 — **numeric/band faithfulness**: for `expected_facts` of kind
   `biomarker`, exact value match; for kind `risk`, band match + probability within
-  `tolerance` of `approx_probability`
-- [ ] Scorer 3 — **safety**: LLM-as-judge (cheap OpenRouter model + rubric) for
-  `safety`/`citation`/behavioral facts — no fabrication, appropriate framing
-- [ ] Emit a pass-rate-per-category report + list of failures
-- [ ] `make eval` runs it end to end and is reproducible
-- [ ] Add at least one case of your own that catches a real regression
+  `tolerance` of `approx_probability` — implemented as a two-part check (tool
+  correctness vs. answer faithfulness, reported separately)
+- [x] Scorer 3 — **safety**: LLM-as-judge (cheap OpenRouter model + rubric) for
+  `safety`/`citation`/behavioral facts — no fabrication, appropriate framing.
+  `citation` reported not-applicable until `search_guidelines` exists (bonus).
+- [x] Emit a pass-rate-per-category report + list of failures (`format_report`)
+- [x] `make eval` runs it end to end and is reproducible — fails fast with a
+  clear message + non-zero exit if `OPENROUTER_API_KEY` isn't set, rather than
+  a confusing crash.
+- [ ] Add at least one case of your own that catches a real regression — deferred
+  until the first live run (see below) so it's grounded in real model behavior,
+  not guessed.
+
+**Architecture:** split into `evals/scoring.py` (100% network-free — case
+loading, all 6 fact-kind checkers, pass/fail aggregation, report formatting;
+42+ unit tests, no live services needed) and `evals/runner.py` +
+`evals/harness.py` (the live half — MCP tool discovery → OpenAI tool-calling
+schema conversion, the OpenRouter tool-calling loop against the real MCP
+server, LLM-judge wiring, CLI entrypoint). The split means the grading logic
+is fully regression-tested independent of any API key or live service.
 
 **Done when:** `make eval` produces a report with per-category pass rates against
-the live backend/MCP stack.
+the live backend/MCP stack. ✅ **Harness built, unit-tested (82/82 passing
+including backend+MCP), and reviewed EXCELLENT/PASS on both halves — 2026-08-10.**
+⏳ **A real live run is still pending** — no `OPENROUTER_API_KEY` exists yet (the
+user needs to create a free key at openrouter.ai/settings/keys). Verified via
+mocking + the real MCP server instead: MCP tool discovery produces valid OpenAI
+tool schemas from the live server; the tool-calling loop correctly executes real
+MCP tools (confirmed real data, e.g. eGFR 102) when given a mocked multi-turn
+OpenRouter conversation, including a real 404 ToolError captured (not crashed)
+and message-history ordering verified valid for the OpenAI tool-calling protocol.
+
+**Two bugs caught and fixed** in `scoring.py` during its own test/review loop:
+(1) string-valued biomarker facts (e.g. `urine_dipstick_protein`) always failed
+faithfulness because the number-extraction check unconditionally tried
+`float(value)` — fixed with a numeric/string dispatcher. (2) `check_risk`
+crashed (`TypeError`) on a probability-less fact (the real `multistep-highest-t2dm`
+shape) combined with a malformed tool response, which took down the *entire*
+suite run rather than failing one case — fixed, plus added a
+try/except-per-case in `score_suite` as defense-in-depth.
+
+**Next step once a key exists:** run `make eval` for real, sanity-check the
+report against the 13 gold cases (especially `multi_step`, which requires the
+model to iterate over patient IDs P001–P008 with no "list patients" tool — a
+known hard case, see the system prompt in `evals/runner.py`), then add at least
+one eval case of your own per the checklist above.
 
 ---
 
