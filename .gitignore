@@ -15,6 +15,14 @@ librechat/.env
 # MLflow local artifacts (generated when serving/logging models locally)
 mlruns/
 mlartifacts/
+mlflow.db
+
+# Generated MLflow pyfunc router (rebuild with `uv run python models/generate_router.py`).
+# Unlike data/patient_db.db and models/*.pkl (provided scaffold, committed on purpose),
+# this is our build output: bundles cloned copies of the 5 pickles + a full env spec
+# (uv.lock/pyproject.toml/conda.yaml) per save — reproducible from the script, not
+# worth the repo bloat or drift risk of a checked-in binary.
+models/mlflow_risk_router/
 
 # Editors / OS
 .DS_Store

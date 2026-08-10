@@ -23,13 +23,17 @@ until it's green.
 ## Phase 1 — MLflow: serve the 5 models on :5001
 Do this before the backend logic so you have something to call while writing it.
 
-- [ ] Inspect each model's contract: `pickle.load` → `feature_names_in_`, `metadata_` (see `models/README.md`)
-- [ ] Write the custom pyfunc **router** model (`models/generate_router.py` or similar):
+- [x] Inspect each model's contract: `pickle.load` → `feature_names_in_`, `metadata_` (see `models/README.md`)
+- [x] Write the custom pyfunc **router** model (`models/generate_router.py`):
   loads all 5 pickles as artifacts, dispatches on a `model` param, returns
-  `predict_proba(X)[:, 1]` — **not** `.predict()` (the labels-vs-probabilities gotcha)
-- [ ] `mlflow.pyfunc.log_model(...)` once with all 5 artifacts + a signature that includes the `model` param
-- [ ] `uv run mlflow models serve -m <model-uri> -p 5001 --env-manager local`
-- [ ] Smoke test with the P004 CKD payload from `GUIDE.md` §4 — expect a **high** probability:
+  `predict_proba(X)[:, 1]` — **not** `.predict()` (the labels-vs-probabilities gotcha).
+  Input schema is the union of all 5 models' columns, each marked `required=False`,
+  so a caller can send just the subset the chosen model needs. Output of
+  `uv run python models/generate_router.py` is gitignored (regenerate, don't commit —
+  it bundles a full env spec + cloned pickles per build).
+- [x] `mlflow.pyfunc.save_model(...)` to `models/mlflow_risk_router` with all 5 artifacts + the param/column signature
+- [x] `uv run mlflow models serve -m models/mlflow_risk_router -p 5001 --env-manager local`
+- [x] Smoke test with the P004 CKD payload from `GUIDE.md` §4 — expect a **high** probability:
   ```bash
   curl -s http://127.0.0.1:5001/invocations -H 'Content-Type: application/json' -d '{
     "dataframe_split": {"columns": ["age_years","diabetes","hypertension","proteinuria_trace_plus","egfr"],
@@ -39,6 +43,9 @@ Do this before the backend logic so you have something to call while writing it.
   ```
 
 **Done when:** `/invocations` returns a float probability (not `0`/`1`) for at least one model.
+✅ **2026-08-10** — verified for all 5 (CVD 0.427, T2DM 0.374, CKD 0.500, CLD 0.218,
+DEMENTIA 0.436 on representative payloads); an unknown `model` param returns a clean
+`400` with a readable message instead of crashing.
 
 ---
 
