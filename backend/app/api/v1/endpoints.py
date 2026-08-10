@@ -13,6 +13,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
 
 from ...schemas import BiomarkersResponse, RisksResponse
+from ...services import risk as risk_service
 
 router = APIRouter(prefix="/api/v1", tags=["clinical"])
 
@@ -22,11 +23,7 @@ async def get_current_biomarkers(
     patient_id: str = Query(..., description="Patient identifier, e.g. P001"),
 ) -> BiomarkersResponse:
     """Return the latest biomarker snapshot for a patient."""
-    # TODO: return await risk_service.get_current_biomarkers(patient_id)
-    raise HTTPException(
-        status_code=501,
-        detail="Not implemented — wire this to app.services.risk.get_current_biomarkers",
-    )
+    return await risk_service.get_current_biomarkers(patient_id)
 
 
 @router.get("/get_current_risks", response_model=RisksResponse)

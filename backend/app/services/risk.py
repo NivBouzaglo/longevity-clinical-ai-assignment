@@ -29,12 +29,76 @@ suggestion, not a requirement.
 
 from __future__ import annotations
 
-from ..schemas import BiomarkersResponse, RisksResponse
+from datetime import date
+
+from fastapi import HTTPException
+
+from ..db.sqlite import open_db
+from ..schemas import BiomarkerSnapshot, BiomarkersResponse, RisksResponse
+
+# Clinic "today" is fixed for deterministic age derivation (see data/DATA_DICTIONARY.md).
+CLINIC_TODAY = date(2026, 7, 9)
+
+
+def _age_years(date_of_birth: str, today: date = CLINIC_TODAY) -> int:
+    """Whole years between an ISO ``date_of_birth`` and ``today``."""
+    dob = date.fromisoformat(date_of_birth)
+    years = today.year - dob.year
+    if (today.month, today.day) < (dob.month, dob.day):
+        years -= 1
+    return years
 
 
 async def get_current_biomarkers(patient_id: str) -> BiomarkersResponse:
     """Return the latest biomarker snapshot for a patient (404 if unknown)."""
-    raise NotImplementedError("Implement get_current_biomarkers (backend exercise).")
+    async with open_db() as db:
+        async with db.execute(
+            "SELECT patient_id, first_name, last_name, date_of_birth, sex "
+            "FROM demographics WHERE patient_id = ?",
+            (patient_id,),
+        ) as cur:
+            demo = await cur.fetchone()
+
+        if demo is None:
+            raise HTTPException(status_code=404, detail=f"Unknown patient_id: {patient_id!r}")
+
+        async with db.execute(
+            "SELECT * FROM biomarkers WHERE patient_id = ? "
+            "ORDER BY measured_at DESC, id DESC LIMIT 1",
+            (patient_id,),
+        ) as cur:
+            bio = await cur.fetchone()
+
+        if bio is None:
+            raise HTTPException(
+                status_code=404, detail=f"No biomarkers on file for patient_id: {patient_id!r}"
+            )
+
+    return BiomarkersResponse(
+        patient_id=demo["patient_id"],
+        name=f"{demo['first_name']} {demo['last_name']}",
+        age_years=_age_years(demo["date_of_birth"]),
+        sex=demo["sex"],
+        biomarkers=BiomarkerSnapshot(
+            patient_id=bio["patient_id"],
+            measured_at=bio["measured_at"],
+            systolic_bp=bio["systolic_bp"],
+            diastolic_bp=bio["diastolic_bp"],
+            total_cholesterol_mgdl=bio["total_cholesterol_mgdl"],
+            hdl_cholesterol_mgdl=bio["hdl_cholesterol_mgdl"],
+            ldl_cholesterol_mgdl=bio["ldl_cholesterol_mgdl"],
+            triglycerides_mgdl=bio["triglycerides_mgdl"],
+            hba1c_percent=bio["hba1c_percent"],
+            fasting_glucose_mgdl=bio["fasting_glucose_mgdl"],
+            egfr_ml_min_1_73m2=bio["egfr_ml_min_1_73m2"],
+            creatinine_mgdl=bio["creatinine_mgdl"],
+            uacr_mg_g=bio["uacr_mg_g"],
+            urine_dipstick_protein=bio["urine_dipstick_protein"],
+            ggt_u_l=bio["ggt_u_l"],
+            alt_u_l=bio["alt_u_l"],
+            ast_u_l=bio["ast_u_l"],
+        ),
+    )
 
 
 async def get_current_risks(patient_id: str) -> RisksResponse:
