@@ -10,13 +10,13 @@ until it's green.
 ---
 
 ## Phase 0 — Environment setup
-- [ ] `uv sync`
-- [ ] `cp .env.example .env`
-- [ ] `make data` (regenerates `data/patient_db.db` + `models/*.pkl` — should run clean, already committed)
-- [ ] `make backend` → `curl http://127.0.0.1:8001/health` returns `{"status":"ok",...}`
-- [ ] `make test` → `test_health` passes, everything else still skipped
+- [x] `uv sync`
+- [x] `cp .env.example .env`
+- [x] `make data` (regenerates `data/patient_db.db` + `models/*.pkl` — should run clean, already committed)
+- [x] `make backend` → `curl http://127.0.0.1:8001/health` returns `{"status":"ok",...}`
+- [x] `make test` → `test_health` passes, everything else still skipped
 
-**Done when:** backend boots, health check green, no import errors.
+**Done when:** backend boots, health check green, no import errors. ✅ **2026-08-10**
 
 ---
 
