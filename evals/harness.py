@@ -54,7 +54,9 @@ from evals.scoring import Case, Trace, format_report, load_cases, score_suite  #
 load_dotenv(REPO_ROOT / ".env")
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini").strip() or "openai/gpt-4o-mini"
+OPENROUTER_MODEL = (
+    os.getenv("OPENROUTER_MODEL", "openai/gpt-oss-20b:free").strip() or "openai/gpt-oss-20b:free"
+)
 # Optional cheaper/separate judge model; falls back to the same model driving the cases.
 OPENROUTER_JUDGE_MODEL = os.getenv("OPENROUTER_JUDGE_MODEL", "").strip() or OPENROUTER_MODEL
 MCP_BEARER_TOKEN = os.getenv("MCP_BEARER_TOKEN", "dev-longevity-token-change-me")

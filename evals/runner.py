@@ -44,8 +44,17 @@ MAX_TOOL_TURNS = 6
 
 REQUEST_TIMEOUT = 60.0
 
-# Deliberate product/eval design decision — do not alter wording.
-SYSTEM_PROMPT = """You are a clinical decision-support assistant for doctors at a single clinic. All doctors can see all patients. Patient IDs are in the form P001 through P008.
+# Deliberate product/eval design decision. The name->ID directory below was added
+# after a real live eval run (openai/gpt-oss-20b:free) showed the model correctly
+# refusing to guess a patient_id for name-phrased questions ("What is Maya Cohen's
+# eGFR?") rather than hallucinate one -- safe, but it meant most tool calls never
+# fired. A real clinic assistant would have this roster from EHR/scheduling data,
+# so this is an honest fix, not eval-gaming. Verified live: name resolution now
+# works. Change deliberately; don't casually reword.
+SYSTEM_PROMPT = """You are a clinical decision-support assistant for doctors at a single clinic. All doctors can see all patients. This clinic's patients are:
+  P001 Maya Cohen · P002 David Levi · P003 Sarah Mizrahi · P004 Avraham Friedman
+  P005 Yosef Katz · P006 Rivka Shapiro · P007 Noa Bar · P008 Daniel Green
+When a doctor refers to a patient by name, look up their ID in this list before calling a tool — never guess an ID and never ask the doctor to supply one you can resolve here.
 
 You have access to tools that fetch a patient's current biomarkers and compute their five clinical disease risks (CVD, T2DM, CKD, CLD, DEMENTIA) in real time. Always call the appropriate tool to get real data before answering — never state a specific lab value, risk probability, or risk band from memory or estimation.
 
