@@ -199,6 +199,35 @@ model to iterate over patient IDs P001–P008 with no "list patients" tool — a
 known hard case, see the system prompt in `evals/runner.py`), then add at least
 one eval case of your own per the checklist above.
 
+### Update — 2026-08-11: Docker + OpenRouter key set up, first live runs done
+- [x] **Docker Desktop installed** (4.86.0) — `docker`, `docker compose` (v5.3.1),
+  and the daemon all verified working (`hello-world` container ran end to end).
+  Ready for Phase 5.
+- [x] **OpenRouter key created and wired in** — free tier, model
+  `openai/gpt-oss-20b:free` (chosen after querying OpenRouter's live `/models`
+  endpoint for actually-current free tool-calling-capable models — see chat
+  history for the full list at the time). Key confirmed valid via `/api/v1/key`.
+- [x] **First live `make eval` run**: 3/13 passed (23%). Diagnosed via raw
+  trace inspection (not guessed): the model was safely refusing to guess a
+  `patient_id` when doctors asked about patients **by name** (most gold
+  cases) — no name→ID mapping existed in the system prompt. Fixed (see the
+  "Add patient name directory" commit) — verified live afterward, name
+  resolution works correctly now.
+- [x] **Second real finding, left as a documented limitation**: on
+  `multistep-highest-t2dm`, the model correctly tool-called 4 of 8 patients
+  (including the right answer, P003) then returned an **empty final answer**
+  instead of finishing the comparison — a free-tier-model reliability gap,
+  not a harness bug. Worth noting in `SOLUTION.md`; a stronger/paid model
+  would likely resolve it.
+- [ ] **A full clean re-run is pending** — hit OpenRouter's free-tier daily cap
+  (50 req/day, 0 remaining, confirmed via the `429` response body) partway
+  through re-verification. Resets at `2026-08-11 00:00 UTC`. User chose to
+  wait for the reset rather than add credit. **Re-run `make eval` after the
+  reset**, confirm the pass rate with the prompt fix in place, then complete
+  the two remaining Phase 4 checklist items (add a case of your own; consider
+  whether the multi_step empty-answer issue needs a code-level retry/guard or
+  is acceptable as a documented model limitation).
+
 ---
 
 ## Phase 5 — LibreChat wiring
