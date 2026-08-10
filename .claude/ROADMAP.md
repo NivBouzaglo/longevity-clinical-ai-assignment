@@ -54,28 +54,51 @@ This is the core logic. Work in `backend/app/services/risk.py`, wire through
 `backend/app/api/v1/endpoints.py`.
 
 ### 2a. `get_current_biomarkers`
-- [ ] Query `demographics` + `biomarkers` for the patient via `app/db/sqlite.py::open_db`
-- [ ] 404 if patient not found
-- [ ] Map to `BiomarkersResponse` / `BiomarkerSnapshot`
-- [ ] Un-skip `test_biomarkers_known_patient` and `test_unknown_patient_returns_404` → green
+- [x] Query `demographics` + `biomarkers` for the patient via `app/db/sqlite.py::open_db`
+- [x] 404 if patient not found
+- [x] Map to `BiomarkersResponse` / `BiomarkerSnapshot`
+- [x] Un-skip `test_biomarkers_known_patient` and `test_unknown_patient_returns_404` → green
+  (+4 more tests added: second-patient regression guard, full response-shape check,
+  422 on missing param, 404 on empty patient_id)
 
 ### 2b. `get_current_risks`
-- [ ] Load demographics + latest biomarkers (404 if unknown)
-- [ ] Build a payload-building helper per model: read `model.feature_names_in_`,
+- [x] Load demographics + latest biomarkers (404 if unknown)
+- [x] Build a payload-building helper per model: read `model.feature_names_in_`,
   derive `age_years` (vs. clinic-today `2026-07-09`), `bmi`, `waist_hip_ratio`,
   `sex_male`, `current_smoker`, `proteinuria_trace_plus`, `bp_treated` — see
   `data/DATA_DICTIONARY.md` "Derived quantities" table and `models/README.md`
   "Input contracts" for exact names/units per model
-- [ ] Call MLflow via `httpx.AsyncClient`, all 5 models concurrently with `asyncio.gather`
-- [ ] Band each probability (`low <0.10 / borderline <0.20 / intermediate <0.35 / high ≥0.35`)
-- [ ] Append one row per risk to `risks` (store `inputs_json`); decide + document the
-  dedupe strategy for repeated calls (the "GET that writes" trade-off)
-- [ ] 502 if MLflow unreachable
-- [ ] Return `RisksResponse` with current risks (+ optionally `trends`)
-- [ ] Un-skip `test_risks_returns_five_bands` and `test_risks_are_appended` → green
+- [x] Call MLflow via `httpx.AsyncClient`, all 5 models concurrently with `asyncio.gather`
+- [x] Band each probability (`low <0.10 / borderline <0.20 / intermediate <0.35 / high ≥0.35`)
+- [x] Append one row per risk to `risks` (store `inputs_json`); dedupe strategy:
+  compare this call's canonical `inputs_json` against the most recent stored row
+  for that (patient, risk_code) — if identical, skip the INSERT and surface the
+  existing row as "current" instead of writing a near-duplicate. Documented inline
+  in `risk.py` as the deliberate handling of the "GET that writes" smell.
+- [x] 502 if MLflow unreachable (connection errors + non-2xx + malformed response shape)
+- [x] Return `RisksResponse` with current risks + `trends` (last 5 prior points per risk_code)
+- [x] Un-skip `test_risks_returns_five_bands` and `test_risks_are_appended` → green
+  (+5 more tests: response-shape/metadata, trend-excludes-current regression test,
+  repeat-call-no-duplicate-rows, 404, 422, 502-when-MLflow-down via mocked httpx)
 
 **Done when:** `make test` passes fully (no skips left), and manually:
 `curl "http://127.0.0.1:8001/api/v1/get_current_risks?patient_id=P004"` shows CKD as `high`.
+✅ **2026-08-10** — 15/15 tests passing, `ruff check .` clean. CKD for P004 = 0.50 (high).
+
+**Built via a 3-agent workflow** (implementer → test-writer → reviewer, looped once
+on a real finding): first review pass caught a genuine BLOCKER — `trends[risk_code]`
+leaked the "current" value into its own trend list on the dedup no-op path (but
+correctly excluded it on the fresh-insert path), verified empirically by the
+reviewer via live curl calls, not just code reading. Sent back to implementer,
+fixed, re-verified independently (including the reviewer reverting the fix to
+confirm the new regression test actually catches it), re-reviewed: **PASS**, no
+BLOCKER/MAJOR. Three MINOR items noted but not blocking, left as documented
+trade-offs: (1) `asyncio.gather` without `return_exceptions=True` can produce
+"exception never retrieved" log noise on partial 5-model failure — functionally
+harmless, caller still gets a correct 502; (2) no transaction/locking around the
+dedup read-then-write, so two concurrent calls for the same patient could both
+insert — unlikely given the assistant's one-call-per-turn pattern; (3) fixed
+(stale endpoints.py docstring, applied directly).
 
 ---
 
