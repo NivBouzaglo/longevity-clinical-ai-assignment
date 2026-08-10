@@ -1,0 +1,17 @@
+# OPTIONAL override for LibreChat's deploy-compose.yml.
+#
+# Only needed if the MongoDB container crash-loops on your machine — most often on
+# CPUs without AVX support (some virtualized / older / certain Apple-Silicon-via-
+# emulation setups), where the default MongoDB image exits immediately. Pinning a
+# broadly-compatible image fixes it. If your stack starts fine, you can delete this
+# file.
+#
+# NOTE: deploy-compose.yml is a NON-default compose filename, so this override is
+# NOT merged automatically. Pass both files explicitly:
+#     docker compose -f deploy-compose.yml -f docker-compose.override.yml up -d
+#
+services:
+  mongodb:
+    # 7.0 works on most machines. If you still crash-loop with a SIGILL / AVX error,
+    # drop to the last non-AVX line: image: mongo:4.4
+    image: mongo:7.0

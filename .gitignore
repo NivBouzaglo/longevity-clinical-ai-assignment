@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# uv / venv
+.venv/
+
+# Secrets / local env
+.env
+librechat/.env
+
+# MLflow local artifacts (generated when serving/logging models locally)
+mlruns/
+mlartifacts/
+
+# Editors / OS
+.DS_Store
+.vscode/
+.idea/
+
+# Claude Code local (machine-specific, never shared)
+.claude/settings.local.json

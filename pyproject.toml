@@ -1,0 +1,58 @@
+[project]
+name = "longevity-clinical-ai-assignment"
+version = "0.1.0"
+description = "Longevity AI — AI Engineer take-home assignment (clinical chat assistant: FastAPI + MLflow + FastMCP + LibreChat)"
+readme = "README.md"
+requires-python = ">=3.10,<3.14"
+dependencies = [
+    # --- Backend (FastAPI, async) ---
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "aiosqlite>=0.20",          # non-blocking SQLite (do NOT use stdlib sqlite3 in async endpoints)
+    "httpx>=0.27",              # async HTTP client for calling the MLflow model server
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "python-dotenv>=1.0",
+    # --- MCP server ---
+    "fastmcp>=2.9",             # StaticTokenVerifier lives in fastmcp.server.auth.providers.jwt
+    # --- Model serving + (provided) data/model generation ---
+    "mlflow>=2.15",             # the candidate serves the 5 pickle models with `mlflow models serve`
+    "scikit-learn>=1.4",        # the provided models are sklearn LogisticRegression objects
+    "numpy>=1.26",
+    "pandas>=2.2",              # MLflow /invocations dataframe payloads
+]
+
+[project.optional-dependencies]
+# BONUS — evidence-grounded retrieval (search_guidelines tool).
+# chromadb's default embedding function is ONNX-based (no torch), so this stays light.
+rag = [
+    "chromadb>=0.5",
+]
+# BONUS — custom agent track (LangGraph / LangChain over the same MCP tools).
+# langchain-openai targets any OpenAI-compatible base_url, including OpenRouter.
+agent = [
+    "langgraph>=0.2",
+    "langchain>=0.3",
+    "langchain-openai>=0.2",
+    "langchain-mcp-adapters>=0.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.5",
+]
+
+# This repo is a set of runnable apps/scripts, not an installable library.
+# Treat it as a virtual project: `uv sync` builds the shared .venv without packaging the root.
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["backend/tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
