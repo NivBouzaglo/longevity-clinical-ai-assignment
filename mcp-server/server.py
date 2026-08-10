@@ -20,8 +20,10 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import httpx
 from dotenv import load_dotenv
 from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
 from fastmcp.server.auth.providers.jwt import StaticTokenVerifier
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -48,29 +50,62 @@ def ping() -> dict:
     return {"ok": True, "backend_url": BACKEND_URL}
 
 
+def _backend_error_message(exc: httpx.HTTPStatusError) -> str:
+    """Turn a backend HTTP error response into a clear, LLM-readable message."""
+    try:
+        detail = exc.response.json().get("detail", exc.response.text)
+    except ValueError:
+        detail = exc.response.text
+    return f"Backend returned {exc.response.status_code}: {detail}"
+
+
+@mcp.tool
+async def get_current_biomarkers(patient_id: str) -> dict:
+    """Return the latest biomarker snapshot (labs + vitals) for a patient.
+
+    Call this when you need a patient's current raw lab/vital values (e.g. eGFR,
+    HbA1c, lipids, blood pressure) rather than a computed risk assessment.
+    Example patient_id: 'P001'.
+    """
+    async with httpx.AsyncClient(base_url=BACKEND_URL, timeout=15) as http:
+        try:
+            resp = await http.get(
+                "/api/v1/get_current_biomarkers", params={"patient_id": patient_id}
+            )
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise ToolError(_backend_error_message(exc)) from exc
+        except httpx.RequestError as exc:
+            raise ToolError(
+                f"Could not reach the clinical backend at {BACKEND_URL}: {exc}"
+            ) from exc
+        return resp.json()
+
+
+@mcp.tool
+async def get_current_risks(patient_id: str) -> dict:
+    """Compute and return the patient's five clinical risks, each with a trend.
+
+    Call this when you need a patient's risk assessment (e.g. CKD, cardiovascular,
+    diabetes risk) rather than raw biomarker values. This invokes an ML model server
+    and may take a bit longer than fetching biomarkers. Example patient_id: 'P004'.
+    """
+    async with httpx.AsyncClient(base_url=BACKEND_URL, timeout=15) as http:
+        try:
+            resp = await http.get(
+                "/api/v1/get_current_risks", params={"patient_id": patient_id}
+            )
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise ToolError(_backend_error_message(exc)) from exc
+        except httpx.RequestError as exc:
+            raise ToolError(
+                f"Could not reach the clinical backend at {BACKEND_URL}: {exc}"
+            ) from exc
+        return resp.json()
+
+
 # ---------------------------------------------------------------------------
-# TODO — implement the two real tools by wrapping the backend endpoints.
-# A tool's name + docstring + typed args are what the model reads to decide when
-# and how to call it, so make them clear. Handle backend errors gracefully
-# (unknown patient, backend/model server down) and return useful messages.
-#
-# Sketch (uncomment and finish):
-#
-# import httpx
-#
-# @mcp.tool
-# async def get_current_biomarkers(patient_id: str) -> dict:
-#     """Return the latest biomarker snapshot (labs + vitals) for a patient, e.g. 'P001'."""
-#     async with httpx.AsyncClient(base_url=BACKEND_URL, timeout=15) as http:
-#         resp = await http.get("/api/v1/get_current_biomarkers", params={"patient_id": patient_id})
-#         resp.raise_for_status()
-#         return resp.json()
-#
-# @mcp.tool
-# async def get_current_risks(patient_id: str) -> dict:
-#     """Compute and return the patient's five clinical risks (with trend), e.g. 'P004'."""
-#     ...
-#
 # BONUS — a retrieval tool so answers can cite guideline text:
 # @mcp.tool
 # async def search_guidelines(query: str, k: int = 3) -> list[dict]:

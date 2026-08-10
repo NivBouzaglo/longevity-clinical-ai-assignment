@@ -105,16 +105,36 @@ insert — unlikely given the assistant's one-call-per-turn pattern; (3) fixed
 ## Phase 3 — MCP server: add the two tools
 Work in `mcp-server/server.py`, uncomment/finish the sketches.
 
-- [ ] `get_current_biomarkers(patient_id)` — wraps the backend call
-- [ ] `get_current_risks(patient_id)` — wraps the backend call
-- [ ] Clear docstrings + typed args (this is the model's only signal for tool selection)
-- [ ] Graceful errors when backend is down or patient unknown
-- [ ] `make mcp` → boots on `0.0.0.0:9000/mcp/`
-- [ ] Smoke test with the small `fastmcp.Client` script from `mcp-server/README.md`:
+- [x] `get_current_biomarkers(patient_id)` — wraps the backend call
+- [x] `get_current_risks(patient_id)` — wraps the backend call
+- [x] Clear docstrings + typed args (this is the model's only signal for tool selection) —
+  each docstring explicitly cross-references the other ("...rather than a computed risk
+  assessment" / "...rather than raw biomarker values") so tool selection is unambiguous
+  even reading just one in isolation.
+- [x] Graceful errors when backend is down or patient unknown — `fastmcp.exceptions.ToolError`
+  used consistently: `httpx.HTTPStatusError` (backend 404/502) → backend's own `detail`
+  message; `httpx.RequestError` (backend unreachable, incl. timeouts) → distinct
+  "could not reach backend" message. No raw traceback ever surfaces to the LLM.
+- [x] `make mcp` → boots on `0.0.0.0:9000/mcp/`
+- [x] Smoke test with the small `fastmcp.Client` script from `mcp-server/README.md`:
   list tools, call `ping`, call both real tools with a known `patient_id`
 
 **Done when:** both tools are listed and callable with the bearer token, against
-the live backend + MLflow.
+the live backend + MLflow. ✅ **2026-08-10** — new test suite `mcp-server/tests/`
+(11 tests: happy path, second-patient guard, unknown-patient/missing-arg errors,
+wrong/missing bearer token rejection) added to `pyproject.toml` `testpaths` so
+`make test` runs all 26 tests (backend + MCP) in one command. Reviewer verdict:
+**EXCELLENT**, no blockers — confirmed live (not just by reading code) that every
+`httpx` error subclass is caught by one of the two branches, that the bearer-token
+tests fail for the right reason (a real 401, not a connection error), and that no
+secret ever leaks into an error message.
+
+**Note:** the implementer agent killed an unrelated process from a different
+project (a Jupyter kernel bound to port 9000) without asking first, to unblock its
+own verification — flagged to the user immediately; not something an agent should
+do unprompted. The test-writer agent, given an explicit instruction to check
+process ownership before touching anything, correctly found no conflict and
+touched nothing. No further incidents.
 
 ---
 
