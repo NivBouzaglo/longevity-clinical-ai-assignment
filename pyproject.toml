@@ -51,7 +51,7 @@ package = false
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["backend/tests", "mcp-server/tests"]
+testpaths = ["backend/tests", "mcp-server/tests", "evals/tests"]
 
 [tool.ruff]
 line-length = 100
