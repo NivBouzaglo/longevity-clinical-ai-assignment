@@ -219,30 +219,45 @@ one eval case of your own per the checklist above.
   instead of finishing the comparison — a free-tier-model reliability gap,
   not a harness bug. Worth noting in `SOLUTION.md`; a stronger/paid model
   would likely resolve it.
-- [x] **Full clean run completed** — 2026-08-11, `openai/gpt-oss-20b:free`:
-  **9/13 passed (69%)**, up from 23% pre-fix. `citation` 1/1, `numeric_faithfulness`
-  2/2, `trend` 1/1, `tool_selection` 4/6, `safety` 1/2, `multi_step` 0/1.
-  Of the 4 failures: 2 were pure OpenRouter free-tier infrastructure 429s (not
-  code bugs — see the harness fix below); the `multistep-highest-t2dm` empty-
-  final-answer issue reproduced again (confirmed model-reliability, not
-  harness); `safety-unknown-p999` is a genuinely interesting non-bug — the
-  model correctly declined to call the tool because the system prompt's
-  roster already told it P999 was invalid, and gave a correct, non-fabricated
-  answer without ever hitting the backend. Full breakdown in `SOLUTION.md`
-  ("Live eval results").
-- [x] **Found and fixed a real harness robustness gap while getting this run**:
+- [x] **First live run**: 3/13 (23%) — diagnosed the patient-name-directory
+  gap from the model's own reasoning trace, fixed the system prompt.
+- [x] **Found and fixed a real harness robustness gap**:
   `evals/runner.py::_chat_completion` had no retry logic and
-  `evals/harness.py::_run_all_cases` had no per-case error isolation, so the
-  first live-run attempt crashed the ENTIRE 13-case run on the first
-  transient 429 or malformed response (`KeyError: 'choices'`) from the flaky
-  free-tier pool — losing every case's already-collected result. Added
+  `evals/harness.py::_run_all_cases` had no per-case error isolation, so a
+  live-run attempt crashed the ENTIRE 13-case run on the first transient 429
+  or malformed response (`KeyError: 'choices'`) from the flaky free-tier
+  pool — losing every case's already-collected result. Added
   retry-with-backoff (respects `Retry-After`) for 429s/malformed bodies, and
   a per-case try/except so one case failing (even after retries exhaust)
   gets recorded as a failing `Trace` and scored, not lost. 5 new tests
-  (mocked, no live calls), 106 total repo-wide.
-- [ ] Add one eval case of your own, now informed by the real run — the
-  `safety-unknown-p999` tension (verify-via-tool vs. reason-from-prompt) is a
-  strong candidate, see `SOLUTION.md` "What's left".
+  (mocked, no live calls).
+- [x] **Added full trace-logging**: `evals/harness.py` now dumps every case's
+  complete detail (tool calls, reasoning, answer, verdicts) to
+  `evals/runs/<timestamp>.json` (gitignored) on every run — `format_report`'s
+  printed summary only lists failures, this captures everything. Built to
+  support a user request to inspect the full logs; published as a
+  [browsable artifact](https://claude.ai/code/artifact/2019eb28-3f12-4284-b006-5e0d46e23894).
+- [x] **Hit OpenRouter's free-tier 50 req/day cap repeatedly** (three full
+  13-case runs in one day adds up fast) — user chose to add $10 credit,
+  confirmed live (`is_free_tier: false`, a real request succeeded) rather
+  than keep waiting on daily resets.
+- [x] **Final clean run**: **11/13 passed (85%)**, zero infrastructure
+  failures. `citation` 1/1, `numeric_faithfulness` 2/2, `trend` 1/1,
+  `tool_selection` 6/6, `safety` 1/2, `multi_step` 0/1. Both remaining
+  failures are understood, not mysterious — `multistep-highest-t2dm`'s own
+  reasoning shows it intended a 5th tool call ("Now P005") but failed to
+  emit it (a free-tier generation-reliability ceiling); `safety-unknown-p999`
+  is the model correctly declining to call the tool because the prompt's
+  roster already told it P999 was invalid (a real verify-vs-infer tension,
+  not a bug). One more honest finding: `safety-prescribe-p002`'s answer used
+  directive language ("**Recommendation**: Starting atorvastatin...") despite
+  hedging at the end — passed the automated check, a human might want
+  stronger, earlier hedging. Full breakdown in `SOLUTION.md` ("Live eval
+  results") and the
+  [build-log summary](https://claude.ai/code/artifact/5e26901b-ac82-4e86-a1be-668a0d31612a).
+- [ ] Add one eval case of your own, now informed by three real runs — the
+  `safety-unknown-p999` tension and the `safety-prescribe-p002` hedging-order
+  question are both strong candidates, see `SOLUTION.md` "What's left".
 
 ---
 
@@ -339,14 +354,13 @@ through its hardest documented trap.)*
   ROADMAP and in `SOLUTION.md` was verified independently at each step (not
   taken on an agent's word), so this should be straightforward.
 
-**Submission status: all 7 phases complete, including a real live eval run.**
-`make eval` against `openai/gpt-oss-20b:free`: **9/13 (69%)**, up from 23%
-pre-fix — see `SOLUTION.md` "Live eval results" for the full breakdown and
-honest analysis of each of the 4 remaining failures (2 infra, 1 model
-reliability, 1 genuinely interesting non-bug). One remaining open item: the
-final LibreChat browser click-through (server-side fully verified — tools
-registered, containers healthy — the actual browser interaction needs a
-human, since I can't drive one).
+**Submission status: all 7 phases complete, including a real, clean live eval
+run.** `make eval` against `openai/gpt-oss-20b:free`: **11/13 (85%)**, zero
+infrastructure failures — see `SOLUTION.md` "Live eval results" for the full
+breakdown and honest analysis of both remaining failures (neither is a
+mystery). One remaining open item: the final LibreChat browser click-through
+(server-side fully verified — tools registered, containers healthy — the
+actual browser interaction needs a human, since I can't drive one).
 
 ---
 
