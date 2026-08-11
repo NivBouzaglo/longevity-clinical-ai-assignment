@@ -5,11 +5,14 @@ static bearer token, over streamable HTTP. `server.py` boots as-is with one demo
 tool (`ping`); you add the real tools.
 
 ## What to build
-1. **`get_current_biomarkers(patient_id)`** — wraps `GET /api/v1/get_current_biomarkers`.
-2. **`get_current_risks(patient_id)`** — wraps `GET /api/v1/get_current_risks`.
+1. **`get_current_biomarkers(patient_id)`** — wraps `GET /api/v1/get_current_biomarkers`. ✅ built
+2. **`get_current_risks(patient_id)`** — wraps `GET /api/v1/get_current_risks`. ✅ built
 3. **Bonus — `search_guidelines(query, k)`** — retrieval over `data/guidelines/`
    (embeddings + a small vector store) so the assistant can cite guideline text.
-   Install extras with `uv sync --extra rag`. See [`GUIDE.md`](../GUIDE.md).
+   Install extras with `uv sync --extra rag`. See [`GUIDE.md`](../GUIDE.md). ✅ built
+   — see `guidelines_retrieval.py`. Registers only if `chromadb` is importable
+   (guarded `try/except`), so the two required tools still work fine without
+   the `rag` extra installed.
 
 A tool's **name, docstring, and typed arguments are the model's only clue** about
 when and how to call it — write them well. Validate inputs and return clear errors
@@ -21,7 +24,11 @@ uv sync                              # from repo root (installs fastmcp, httpx, 
 uv run python mcp-server/server.py   # listens on http://0.0.0.0:9000/mcp/
 ```
 - Binds **0.0.0.0:9000** on purpose — LibreChat (in Docker) reaches it at
-  `http://host.docker.internal:9000/mcp/`. The **trailing slash matters**.
+  `http://host.docker.internal:9000/mcp/`. The trailing slash matters for
+  `fastmcp.Client` (below) — but for LibreChat specifically, drop it: `/mcp/`
+  307-redirects to `/mcp`, and LibreChat's MCP client doesn't resend the
+  `Authorization` header across that redirect, which silently breaks auth. See
+  `librechat/SETUP.md` trap 6 for the full story (also needs `requiresOAuth: false`).
 - Auth: every request needs `Authorization: Bearer <MCP_BEARER_TOKEN>` (repo-root `.env`).
 
 ## Smoke test (local client)

@@ -35,6 +35,16 @@ async def test_list_tools_includes_ping_and_clinical_tools(client: Client) -> No
     assert {"ping", "get_current_biomarkers", "get_current_risks"} <= names
 
 
+async def test_list_tools_includes_search_guidelines(client: Client) -> None:
+    """search_guidelines is registered alongside the other three tools (the
+    `chromadb` extra is installed in this venv, so server.py's optional-import
+    guard should have wired it up).
+    """
+    tools = await client.list_tools()
+    names = {t.name for t in tools}
+    assert {"ping", "get_current_biomarkers", "get_current_risks", "search_guidelines"} <= names
+
+
 async def test_biomarkers_known_patient(client: Client) -> None:
     result = await client.call_tool("get_current_biomarkers", {"patient_id": "P001"})
     body = result.data
@@ -80,6 +90,29 @@ async def test_risks_second_known_patient(client: Client, reset_db) -> None:
     assert body["patient_id"] == "P002"
     assert body["name"] == "David Levi"
     assert {x["risk_code"] for x in body["risks"]} == RISK_CODES
+
+
+async def test_search_guidelines_known_query_returns_expected_source(client: Client) -> None:
+    """A real query against the live server surfaces the expected guideline
+    file, mirroring test_biomarkers_known_patient's style of asserting on
+    real returned data rather than just checking the call didn't crash.
+    """
+    result = await client.call_tool(
+        "search_guidelines", {"query": "How is chronic kidney disease risk estimated?"}
+    )
+    results = result.data
+    assert results
+    sources = {r["source"] for r in results}
+    assert "ckd_framingham.md" in sources
+    for r in results:
+        assert set(r.keys()) == {"text", "source", "section", "distance"}
+
+
+async def test_search_guidelines_k_parameter_is_respected(client: Client) -> None:
+    result = await client.call_tool(
+        "search_guidelines", {"query": "cardiovascular risk factors", "k": 2}
+    )
+    assert len(result.data) == 2
 
 
 # ---------------------------------------------------------------------------

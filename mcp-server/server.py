@@ -29,6 +29,16 @@ from fastmcp.server.auth.providers.jwt import StaticTokenVerifier
 REPO_ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(REPO_ROOT / ".env")
 
+# `chromadb` (and therefore `search_guidelines`) is an optional extra
+# (`uv sync --extra rag`) — this stays light for anyone who only needs the two
+# required tools. Guard the import so a missing `chromadb` never stops the
+# server from booting; we just skip registering `search_guidelines` below.
+try:
+    from guidelines_retrieval import search as search_guidelines_impl
+except ImportError:
+    search_guidelines_impl = None
+    print("search_guidelines not available — install with `uv sync --extra rag`")
+
 MCP_BEARER_TOKEN = os.getenv("MCP_BEARER_TOKEN", "dev-longevity-token-change-me")
 BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8001")
 HOST = os.getenv("MCP_HOST", "0.0.0.0")
@@ -106,12 +116,28 @@ async def get_current_risks(patient_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# BONUS — a retrieval tool so answers can cite guideline text:
-# @mcp.tool
-# async def search_guidelines(query: str, k: int = 3) -> list[dict]:
-#     """Search the clinical guideline snippets (data/guidelines/) for grounding text."""
-#     ...
+# BONUS — a retrieval tool so answers can cite guideline text. Only registered
+# if `chromadb` (the `rag` extra) was importable above.
 # ---------------------------------------------------------------------------
+if search_guidelines_impl is not None:
+
+    @mcp.tool
+    async def search_guidelines(query: str, k: int = 3) -> list[dict]:
+        """Search the clinic's guideline corpus for snippets relevant to a query.
+
+        Retrieves the top-k most relevant snippets from short educational summaries
+        of the five risk models (CVD, T2DM, CKD, CLD, Dementia) — what each one
+        estimates, which factors drive it, and which levers are modifiable. Use this
+        to explain *why* a risk model flags something (e.g. "what drives CKD risk"
+        or "how is dementia risk estimated") — it pairs naturally with
+        `get_current_risks`, letting you ground an explanation in retrievable,
+        citable text rather than just asserting it. Each result includes the source
+        filename (e.g. 'ckd_framingham.md') so the explanation can be cited.
+        Example query: 'what factors lower cardiovascular risk'.
+        """
+        # Synchronous chromadb call — fine to call directly given how small/fast
+        # this corpus is, no need to spawn a thread.
+        return search_guidelines_impl(query, k)
 
 
 def main() -> None:

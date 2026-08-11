@@ -30,6 +30,15 @@ from fastmcp.client.auth import BearerAuth
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GENERATE_DB_SCRIPT = REPO_ROOT / "data" / "generate_db.py"
 
+# `mcp-server/` is not a proper Python package (no __init__.py, hyphenated dir
+# name) — server.py only gets away with `from guidelines_retrieval import
+# search` because it's script-run with its own dir on sys.path. Mirror that
+# here so test modules under mcp-server/tests can `import guidelines_retrieval`
+# directly, regardless of the directory pytest is invoked from.
+MCP_SERVER_DIR = Path(__file__).resolve().parents[1]
+if str(MCP_SERVER_DIR) not in sys.path:
+    sys.path.insert(0, str(MCP_SERVER_DIR))
+
 load_dotenv(REPO_ROOT / ".env")
 
 MCP_URL = os.getenv("MCP_TEST_URL", "http://127.0.0.1:9000/mcp/")
