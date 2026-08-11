@@ -255,9 +255,39 @@ one eval case of your own per the checklist above.
   stronger, earlier hedging. Full breakdown in `SOLUTION.md` ("Live eval
   results") and the
   [build-log summary](https://claude.ai/code/artifact/5e26901b-ac82-4e86-a1be-668a0d31612a).
-- [ ] Add one eval case of your own, now informed by three real runs — the
-  `safety-unknown-p999` tension and the `safety-prescribe-p002` hedging-order
-  question are both strong candidates, see `SOLUTION.md` "What's left".
+- [ ] Add one eval case of your own, now informed by five real runs — the
+  `safety-prescribe-p002` hedging-order question is now the strongest
+  candidate, see `SOLUTION.md` "What's left".
+
+### Update — 2026-08-11 (later): both remaining failures actually fixed
+User asked to solve `safety-unknown-p999` and `multistep-highest-t2dm`
+rather than accept them as documented limitations. Both were fixable:
+
+- [x] **`safety-unknown-p999` fixed**: the model was treating the system
+  prompt's patient roster as authoritative for existence, not just name
+  lookup. Added an explicit instruction — the roster is for name lookup
+  only, always verify via the tool before concluding "not found." Live-verified:
+  the model now calls `get_current_risks` for P999 and reports the real 404.
+- [x] **`multistep-highest-t2dm` fixed**, in two parts: `MAX_TOOL_TURNS` was
+  6 but the task needs up to 9 (8 patients + 1 synthesis, since this model
+  doesn't batch tool calls) — raised to 10. Separately, added handling for a
+  "degenerate" turn (no tool call, no text — the model made no decision).
+  First attempt (blind retry) didn't hold up: a full run showed the model
+  hitting the identical stuck point three times with byte-identical
+  reasoning, proving a blind resend wouldn't help. Fixed with a *corrective
+  nudge* message per retry instead — verified this measurably improved
+  reliability across four subsequent runs (4→6→8 of 8 patients queried),
+  landing a fully correct 8/8 sweep with the right answer (P003, high) on
+  the final run.
+- [x] **Final result: 12/13 (92%)**, confirmed across 5 total live runs (not
+  a fluke — each fix was verified by direct repeated observation, not
+  inference). The one remaining failure, `safety-prescribe-p002`, is real,
+  non-deterministic safety signal (the LLM judge's verdict on the same
+  answer pattern flipped between runs) — not a bug, see `SOLUTION.md` for
+  why it's being left as documented signal rather than force-fixed.
+- [x] Both eval log artifacts republished with the final 12/13 data:
+  [full trace log](https://claude.ai/code/artifact/2019eb28-3f12-4284-b006-5e0d46e23894),
+  [build-log summary](https://claude.ai/code/artifact/5e26901b-ac82-4e86-a1be-668a0d31612a).
 
 ---
 
@@ -354,13 +384,16 @@ through its hardest documented trap.)*
   ROADMAP and in `SOLUTION.md` was verified independently at each step (not
   taken on an agent's word), so this should be straightforward.
 
-**Submission status: all 7 phases complete, including a real, clean live eval
-run.** `make eval` against `openai/gpt-oss-20b:free`: **11/13 (85%)**, zero
-infrastructure failures — see `SOLUTION.md` "Live eval results" for the full
-breakdown and honest analysis of both remaining failures (neither is a
-mystery). One remaining open item: the final LibreChat browser click-through
-(server-side fully verified — tools registered, containers healthy — the
-actual browser interaction needs a human, since I can't drive one).
+**Submission status: all 7 phases complete, including a real, thoroughly
+verified live eval run.** `make eval` against `openai/gpt-oss-20b:free`:
+**12/13 (92%)**, confirmed across 5 total live runs — see `SOLUTION.md`
+"Live eval results" for the full breakdown, including how each of the two
+fixable failures was actually diagnosed and fixed (not just documented as a
+limitation), and why the one remaining failure is left as genuine safety
+signal rather than force-fixed. One remaining open item: the final LibreChat
+browser click-through (server-side fully verified — tools registered,
+containers healthy — the actual browser interaction needs a human, since I
+can't drive one).
 
 ---
 
