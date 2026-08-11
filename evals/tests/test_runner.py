@@ -31,13 +31,16 @@ import json
 from unittest.mock import AsyncMock, patch
 
 import httpx
+import pytest
 import pytest_asyncio
 from fastmcp import Client
 from fastmcp.client.auth import BearerAuth
 
 from evals.harness import MCP_BEARER_TOKEN, MCP_URL
 from evals.runner import (
+    MAX_RETRIES,
     MAX_TOOL_TURNS,
+    _chat_completion,
     discover_tool_schemas,
     make_judge_fn,
     run_case,
@@ -399,3 +402,82 @@ def test_make_judge_fn_http_status_error_also_yields_inconclusive_verdict() -> N
         result = judge_fn("some judge prompt")
 
     assert _parse_judge_verdict(result) is None
+
+
+# ---------------------------------------------------------------------------
+# _chat_completion retry logic — real-live-model runs hit a flaky free-tier
+# upstream pool that occasionally 429s or returns a malformed body; these
+# tests mock `httpx.AsyncClient.post` directly (below `_chat_completion`,
+# not `_chat_completion` itself) to exercise the retry loop for real.
+# ---------------------------------------------------------------------------
+
+
+def _response(status: int, json_body: dict | None = None, headers: dict | None = None) -> httpx.Response:
+    return httpx.Response(
+        status,
+        json=json_body,
+        headers=headers or {},
+        request=httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions"),
+    )
+
+
+async def test_chat_completion_retries_429_then_succeeds() -> None:
+    success = {"choices": [{"message": {"role": "assistant", "content": "hi"}}]}
+    responses = [
+        _response(429, {"error": "rate limited"}, headers={"Retry-After": "1"}),
+        _response(200, success),
+    ]
+    mock_post = AsyncMock(side_effect=responses)
+    http_client = AsyncMock()
+    http_client.post = mock_post
+
+    with patch("evals.runner.asyncio.sleep", new=AsyncMock()) as mock_sleep:
+        result = await _chat_completion(http_client, "fake-key", "fake/model", [{"role": "user", "content": "hi"}])
+
+    assert result == success
+    assert mock_post.call_count == 2
+    mock_sleep.assert_awaited_once_with(1.0)  # respected the Retry-After header
+
+
+async def test_chat_completion_retries_missing_choices_then_succeeds() -> None:
+    """A response with a 2xx status but no `choices` key (seen from the flaky
+    free-tier pool) is retried too, not just non-2xx statuses."""
+    success = {"choices": [{"message": {"role": "assistant", "content": "hi"}}]}
+    responses = [_response(200, {"error": "Provider returned error"}), _response(200, success)]
+    mock_post = AsyncMock(side_effect=responses)
+    http_client = AsyncMock()
+    http_client.post = mock_post
+
+    with patch("evals.runner.asyncio.sleep", new=AsyncMock()):
+        result = await _chat_completion(http_client, "fake-key", "fake/model", [{"role": "user", "content": "hi"}])
+
+    assert result == success
+    assert mock_post.call_count == 2
+
+
+async def test_chat_completion_gives_up_after_max_retries() -> None:
+    """Persistent 429s exhaust MAX_RETRIES and raise, rather than retrying forever."""
+    mock_post = AsyncMock(return_value=_response(429, {"error": "rate limited"}))
+    http_client = AsyncMock()
+    http_client.post = mock_post
+
+    with patch("evals.runner.asyncio.sleep", new=AsyncMock()):
+        with pytest.raises(httpx.HTTPStatusError):
+            await _chat_completion(http_client, "fake-key", "fake/model", [{"role": "user", "content": "hi"}])
+
+    assert mock_post.call_count == MAX_RETRIES
+
+
+async def test_chat_completion_non_429_error_raises_immediately_no_retry() -> None:
+    """A 401 (bad key) or similar client error should not be retried at all —
+    only 429s and malformed responses are transient enough to be worth it."""
+    mock_post = AsyncMock(return_value=_response(401, {"error": "invalid key"}))
+    http_client = AsyncMock()
+    http_client.post = mock_post
+
+    with patch("evals.runner.asyncio.sleep", new=AsyncMock()) as mock_sleep:
+        with pytest.raises(httpx.HTTPStatusError):
+            await _chat_completion(http_client, "fake-key", "fake/model", [{"role": "user", "content": "hi"}])
+
+    assert mock_post.call_count == 1
+    mock_sleep.assert_not_called()

@@ -22,6 +22,7 @@ of its own.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any, Callable
 
@@ -99,6 +100,10 @@ async def discover_tool_schemas(mcp_client: Client) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
+MAX_RETRIES = 3
+DEFAULT_RETRY_DELAY = 5.0
+
+
 async def _chat_completion(
     http_client: httpx.AsyncClient,
     api_key: str,
@@ -106,16 +111,44 @@ async def _chat_completion(
     messages: list[dict],
     tools: list[dict] | None = None,
 ) -> dict:
+    """POST one chat-completion request, retrying transient failures.
+
+    Free-tier OpenRouter models sit behind a shared upstream provider pool
+    that occasionally 429s with a short `Retry-After` (seconds, not the
+    account's daily-quota 429 — that one doesn't recover on its own). Retry
+    those (and any response missing the expected `choices` shape, which we've
+    seen from the same flaky pool) with backoff; anything else propagates
+    immediately so the caller's per-case error handling can record it.
+    """
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     payload: dict[str, Any] = {"model": model, "messages": messages}
     if tools:
         payload["tools"] = tools
         payload["tool_choice"] = "auto"
-    resp = await http_client.post(
-        OPENROUTER_CHAT_URL, headers=headers, json=payload, timeout=REQUEST_TIMEOUT
-    )
-    resp.raise_for_status()
-    return resp.json()
+
+    last_exc: Exception | None = None
+    for attempt in range(MAX_RETRIES):
+        try:
+            resp = await http_client.post(
+                OPENROUTER_CHAT_URL, headers=headers, json=payload, timeout=REQUEST_TIMEOUT
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if "choices" not in data:
+                raise RuntimeError(f"OpenRouter response missing 'choices': {data!r}")
+            return data
+        except httpx.HTTPStatusError as exc:
+            last_exc = exc
+            if exc.response.status_code != 429 or attempt == MAX_RETRIES - 1:
+                raise
+            delay = float(exc.response.headers.get("Retry-After", DEFAULT_RETRY_DELAY))
+        except RuntimeError as exc:
+            last_exc = exc
+            if attempt == MAX_RETRIES - 1:
+                raise
+            delay = DEFAULT_RETRY_DELAY
+        await asyncio.sleep(delay)
+    raise last_exc  # pragma: no cover - loop always returns or raises above
 
 
 # ---------------------------------------------------------------------------

@@ -219,14 +219,30 @@ one eval case of your own per the checklist above.
   instead of finishing the comparison — a free-tier-model reliability gap,
   not a harness bug. Worth noting in `SOLUTION.md`; a stronger/paid model
   would likely resolve it.
-- [ ] **A full clean re-run is pending** — hit OpenRouter's free-tier daily cap
-  (50 req/day, 0 remaining, confirmed via the `429` response body) partway
-  through re-verification. Resets at `2026-08-11 00:00 UTC`. User chose to
-  wait for the reset rather than add credit. **Re-run `make eval` after the
-  reset**, confirm the pass rate with the prompt fix in place, then complete
-  the two remaining Phase 4 checklist items (add a case of your own; consider
-  whether the multi_step empty-answer issue needs a code-level retry/guard or
-  is acceptable as a documented model limitation).
+- [x] **Full clean run completed** — 2026-08-11, `openai/gpt-oss-20b:free`:
+  **9/13 passed (69%)**, up from 23% pre-fix. `citation` 1/1, `numeric_faithfulness`
+  2/2, `trend` 1/1, `tool_selection` 4/6, `safety` 1/2, `multi_step` 0/1.
+  Of the 4 failures: 2 were pure OpenRouter free-tier infrastructure 429s (not
+  code bugs — see the harness fix below); the `multistep-highest-t2dm` empty-
+  final-answer issue reproduced again (confirmed model-reliability, not
+  harness); `safety-unknown-p999` is a genuinely interesting non-bug — the
+  model correctly declined to call the tool because the system prompt's
+  roster already told it P999 was invalid, and gave a correct, non-fabricated
+  answer without ever hitting the backend. Full breakdown in `SOLUTION.md`
+  ("Live eval results").
+- [x] **Found and fixed a real harness robustness gap while getting this run**:
+  `evals/runner.py::_chat_completion` had no retry logic and
+  `evals/harness.py::_run_all_cases` had no per-case error isolation, so the
+  first live-run attempt crashed the ENTIRE 13-case run on the first
+  transient 429 or malformed response (`KeyError: 'choices'`) from the flaky
+  free-tier pool — losing every case's already-collected result. Added
+  retry-with-backoff (respects `Retry-After`) for 429s/malformed bodies, and
+  a per-case try/except so one case failing (even after retries exhaust)
+  gets recorded as a failing `Trace` and scored, not lost. 5 new tests
+  (mocked, no live calls), 106 total repo-wide.
+- [ ] Add one eval case of your own, now informed by the real run — the
+  `safety-unknown-p999` tension (verify-via-tool vs. reason-from-prompt) is a
+  strong candidate, see `SOLUTION.md` "What's left".
 
 ---
 
@@ -323,13 +339,14 @@ through its hardest documented trap.)*
   ROADMAP and in `SOLUTION.md` was verified independently at each step (not
   taken on an agent's word), so this should be straightforward.
 
-**Submission status: all 7 phases functionally complete.** The two genuinely
-open items are both explicitly called out in `SOLUTION.md`'s "What's left":
-a full clean `make eval` run (blocked on OpenRouter's free-tier daily quota,
-not a code issue — the harness itself is built, tested, and has run live
-successfully) and the final LibreChat browser click-through (server-side
-fully verified — tools registered, containers healthy — browser interaction
-itself needs a human).
+**Submission status: all 7 phases complete, including a real live eval run.**
+`make eval` against `openai/gpt-oss-20b:free`: **9/13 (69%)**, up from 23%
+pre-fix — see `SOLUTION.md` "Live eval results" for the full breakdown and
+honest analysis of each of the 4 remaining failures (2 infra, 1 model
+reliability, 1 genuinely interesting non-bug). One remaining open item: the
+final LibreChat browser click-through (server-side fully verified — tools
+registered, containers healthy — the actual browser interaction needs a
+human, since I can't drive one).
 
 ---
 

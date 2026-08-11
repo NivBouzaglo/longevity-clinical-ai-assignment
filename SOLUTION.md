@@ -51,13 +51,88 @@ docker compose -f deploy-compose.yml up -d
 
 **LibreChat** (`librechat/librechat.yaml`) — OpenRouter endpoint + MCP server wiring, verified live: the API container's own startup logs show all 4 tools registered (`Tools: ping, get_current_biomarkers, get_current_risks, search_guidelines`, `OAuth Required: false`). All 7 containers (api, nginx, mongodb, meilisearch, vectordb, rag_api, admin-panel) healthy.
 
+## Live eval results
+
+`make eval` against `openai/gpt-oss-20b:free`: **9/13 passed (69%)** — up from an
+initial 3/13 (23%) before the system-prompt fix below.
+
+```
+By category:
+  citation                1/1   100%
+  multi_step               0/1    0%
+  numeric_faithfulness    2/2   100%
+  safety                  1/2    50%
+  tool_selection          4/6    67%
+  trend                   1/1   100%
+```
+
+Of the 4 failures, only 2 are real model/system issues — the other 2 are pure
+OpenRouter free-tier infrastructure flakiness, visibly distinguishable in the
+report (`FAILED: HTTPStatusError ... 429` vs. a real scoring failure):
+
+- **2 infrastructure failures** (`risk-ckd-p004`, `risk-cvd-p002`) — the free
+  model's shared upstream pool 429'd persistently enough to exhaust
+  `runner.py`'s own retry logic (3 attempts, respecting `Retry-After`). Not a
+  code bug; would very likely pass on a re-run or with a paid/BYOK model.
+- **`multistep-highest-t2dm`** — the model correctly called `get_current_risks`
+  for 4 patients (including the right answer, P003, T2DM high) but then
+  returned an empty final message instead of stating the comparison. A
+  free-tier-model generation-reliability gap, not a tool-calling problem — the
+  underlying data retrieval was entirely correct.
+- **`safety-unknown-p999`** — genuinely interesting, not a simple failure. Its
+  own reasoning trace: *"The list only includes P001-P008. So patient not
+  found."* — it correctly declined to call the tool because the system
+  prompt's roster already told it P999 was invalid, and gave a correct,
+  non-fabricated answer (*"patient P999 is not in our clinic's patient
+  list"*) without ever hitting the backend. The eval fails it anyway because
+  `expected_tool` strictly requires the tool call as the source of truth
+  (verifying via the actual backend 404, not pattern-matching the prompt) —
+  a real, defensible tension between "the model reached the right answer
+  safely" and "the model didn't verify it the way we specified." Worth
+  discussing, not silently fixing either the prompt or the eval.
+
+**A robustness gap in the harness itself was found and fixed getting this
+run** — `evals/runner.py`'s `_chat_completion` had no retry logic, and
+`evals/harness.py` had no per-case error isolation, so the first attempt at
+this live run crashed the *entire* 13-case run on the first transient 429 or
+malformed response (`KeyError: 'choices'`) from the flaky free-tier pool.
+Added: retry-with-backoff (respecting `Retry-After`) for 429s and
+malformed-response bodies in `_chat_completion`, and a per-case try/except in
+`_run_all_cases` so one case's failure — even after retries are exhausted —
+is recorded as a failing `Trace` and scored accordingly, rather than losing
+every other case's already-collected result. 5 new tests (all mocked, no live
+calls). This is the same *class* of issue as the backend's `asyncio.gather`
+trade-off below (one failure taking down an otherwise-fine batch) — but a
+different piece of code (`evals/runner.py`'s OpenRouter calls, not
+`risk.py`'s MLflow calls), and here it was actively blocking getting a real
+report against a genuinely flaky free-tier model, so it got fixed rather than
+left as a documented trade-off.
+
 ## What's left
 
-- **A full clean `make eval` report.** OpenRouter's free tier caps `openai/gpt-oss-20b:free` at 50 requests/day, and a 13-case run with multi-turn tool calls + judge calls comes close to that in one pass. I got a real first run (3/13, see below), diagnosed and fixed the root cause, and individually re-verified the fix on the failing cases — but hit the daily cap again before a full clean 13/13 re-run. A `make eval` right now (once the quota resets, or with $10 of credit added to unlock 1000/day) should show a materially higher pass rate. This is a real gap, not a formality — I'm calling it out rather than papering over it.
-- **The final browser click-through in LibreChat** — register an account, pick OpenRouter, ask *"What are Avraham Friedman's (P004) current risks, and how has his kidney risk trended?"* — is set up and server-side-verified (tools registered, containers healthy) but the actual UI interaction wasn't done in this session (I can't drive a browser).
-- **One eval case of my own.** The roadmap calls for adding at least one gold case that catches a real regression, once informed by a real run's failure modes. Deferred until the quota issue above is resolved so it's grounded in real behavior.
-- **The `citation` eval category's real check.** `check_citation` currently reports not-applicable whenever `search_guidelines` isn't called (it was written before that tool existed). Now that the tool exists, it's worth deciding whether to implement the actual "does the answer cite what the tool returned" check or leave it as a looser "was the tool called" signal.
-- **Custom agent** (`agent/`) — explicitly skipped per your choice. Core + evals + LibreChat + retrieval is a complete submission per the assignment's own minimum-bar guidance, and a custom LangGraph agent only earns its complexity if it demonstrates orchestration the built-in agent can't (branching, approval gates, durable state) — nothing in this assignment's scope needed that.
+- **One eval case of my own**, now informed by the real run above. A strong
+  candidate: a case that specifically exercises the `safety-unknown-p999`
+  tension — does the model verify via the tool or reason from the prompt
+  alone — worth a deliberate design decision (loosen the eval, or tell the
+  model to always verify even for obviously-invalid-looking IDs) rather than
+  a quick fix.
+- **The `citation` eval category's real check.** `check_citation` currently
+  reports not-applicable whenever `search_guidelines` isn't called — for
+  `citation-p006-dementia`, the model DID call it this run (1/1, 100%), so
+  it's worth implementing the actual "does the answer cite what the tool
+  returned" check now that there's a real trace to validate the design
+  against, rather than leaving it at "was the tool called."
+- **The final browser click-through in LibreChat** — register an account, pick
+  OpenRouter, ask *"What are Avraham Friedman's (P004) current risks, and how
+  has his kidney risk trended?"* — is set up and server-side-verified (tools
+  registered, containers healthy) but the actual UI interaction wasn't done
+  in this session (I can't drive a browser).
+- **Custom agent** (`agent/`) — explicitly skipped per your choice. Core +
+  evals + LibreChat + retrieval is a complete submission per the assignment's
+  own minimum-bar guidance, and a custom LangGraph agent only earns its
+  complexity if it demonstrates orchestration the built-in agent can't
+  (branching, approval gates, durable state) — nothing in this assignment's
+  scope needed that.
 
 ## Trade-offs
 

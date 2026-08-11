@@ -66,22 +66,37 @@ CASES_PATH = REPO_ROOT / "evals" / "cases.jsonl"
 
 
 async def _run_all_cases(cases: list[Case]) -> dict[str, Trace]:
-    """Run every case sequentially against one shared MCP connection + HTTP client."""
+    """Run every case sequentially against one shared MCP connection + HTTP client.
+
+    A single case failing (even after runner.py's own retries — e.g. the free
+    model's upstream pool having a bad few seconds) must not lose every OTHER
+    case's already-collected result. Each case is isolated in its own
+    try/except; a failure is recorded as an empty Trace (no tool calls, no
+    answer) so evals.scoring still scores it — as a fail, correctly — rather
+    than silently vanishing from the report or crashing the whole run.
+    """
     traces: dict[str, Trace] = {}
     async with Client(MCP_URL, auth=BearerAuth(MCP_BEARER_TOKEN)) as mcp_client:
         tool_schemas = await discover_tool_schemas(mcp_client)
         async with httpx.AsyncClient() as http_client:
             for case in cases:
                 print(f"  [{case.id}] ({case.category}) running...", file=sys.stderr)
-                trace = await run_case(
-                    case,
-                    mcp_client,
-                    tool_schemas,
-                    api_key=OPENROUTER_API_KEY,
-                    model=OPENROUTER_MODEL,
-                    http_client=http_client,
-                )
-                traces[case.id] = trace
+                try:
+                    traces[case.id] = await run_case(
+                        case,
+                        mcp_client,
+                        tool_schemas,
+                        api_key=OPENROUTER_API_KEY,
+                        model=OPENROUTER_MODEL,
+                        http_client=http_client,
+                    )
+                except Exception as exc:  # noqa: BLE001 - one bad case must not sink the run
+                    print(f"  [{case.id}] FAILED: {type(exc).__name__}: {exc}", file=sys.stderr)
+                    traces[case.id] = Trace(
+                        case_id=case.id,
+                        final_answer="",
+                        raw_messages=[{"role": "system", "content": f"runner error: {exc}"}],
+                    )
     return traces
 
 
