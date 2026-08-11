@@ -19,6 +19,12 @@ git clone --branch <RELEASE_TAG> --depth 1 https://github.com/danny-avila/LibreC
 cd LibreChat
 ```
 
+> **This submission is pinned to `v0.8.7`** (verified: `package.json`'s version and
+> the checked-out commit SHA both match GitHub's `v0.8.7` tag exactly). Confirmed
+> to support `mcpSettings.allowedAddresses`, `type: streamable-http`, and
+> `requiresOAuth` (see trap 6 below). Clone it outside this repo, as a sibling
+> directory (e.g. `../LibreChat`) — it's its own project, not vendored here.
+
 ## 2. Environment
 There are **two** `.env` files, and they are different:
 - the **assignment repo's** `.env` (for the backend + MCP server), and
@@ -62,6 +68,12 @@ The comments in the `mcpSettings` section of `librechat.example.yaml` explain th
 networking constraints you need to satisfy — read them closely before you fill in the
 URL and the allowlist.
 
+> This submission's working config is checked in at
+> [`librechat.yaml`](librechat.yaml) — copy it into your LibreChat checkout as-is
+> (it already has the OpenRouter block, the MCP server block, and the
+> `requiresOAuth: false` fix from trap 6 below) rather than re-deriving it from
+> the example file.
+
 ## 4. Run
 `deploy-compose.yml` mounts `./librechat.yaml` and reads `./.env`.
 ```bash
@@ -91,6 +103,23 @@ tool. Debug in this order:
    A protocol/HTTP error means the network path works; *connection refused* means the
    host/port/bind is wrong.
 5. **Model** — does the selected OpenRouter model support tool/function calling?
+6. **OAuth misdetection (found while building this submission)** — even with a
+   correctly-configured `headers: Authorization: Bearer ${MCP_BEARER_TOKEN}`,
+   logs may show `OAuth Required: true` and `... Initialized with 1 configured
+   server and 0 tools.` LibreChat auto-probes the server *without* your
+   configured headers first, to detect whether OAuth is needed. A static-token
+   server (like this one, `StaticTokenVerifier`) correctly answers that
+   unauthenticated probe with `401` + `WWW-Authenticate: Bearer` — which
+   LibreChat misreads as "this server requires OAuth" and then never tries
+   your static header at all, even though a manual authenticated request
+   against the same URL succeeds cleanly (step 4's `wget` check above will
+   show 401 unauthenticated / working authenticated, which looks fine and
+   hides this issue — check the `api` container's own startup logs for the
+   `[MCP][<name>]` block instead). **Fix:** add `requiresOAuth: false` to the
+   MCP server's config entry to skip that probe. Separately, also point the
+   `url` at the path *without* a trailing slash if your server 307-redirects
+   `/mcp/` → `/mcp` (or vice versa) — some MCP clients drop the `Authorization`
+   header across that redirect.
 
 References:
 - MCP servers in LibreChat: <https://www.librechat.ai/docs/mcp_servers>

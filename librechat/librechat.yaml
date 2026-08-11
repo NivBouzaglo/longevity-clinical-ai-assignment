@@ -1,0 +1,56 @@
+# Longevity AI take-home — LibreChat config.
+# Wires the built-in agent to OpenRouter and to this project's FastMCP server
+# (mcp-server/server.py, running on the host at 0.0.0.0:9000, reached from this
+# Docker container via host.docker.internal — see the assignment repo's
+# GUIDE.md and librechat/SETUP.md for the full networking explanation).
+#
+# Verified working against LibreChat v0.8.7 (see SETUP.md for the pinned tag).
+# Copy this into your LibreChat checkout as ./librechat.yaml.
+
+version: 1.3.13
+cache: true
+
+# SSRF exemption: without this, LibreChat blocks all private/loopback targets
+# by default, and host.docker.internal resolves to a private IP from inside
+# the container. This allows exactly that one host:port, nothing else.
+mcpSettings:
+  allowedAddresses:
+    - 'host.docker.internal:9000'
+
+mcpServers:
+  longevity-clinical:
+    type: streamable-http
+    # NO trailing slash here (unlike the fastmcp.Client examples elsewhere in this
+    # project) — hitting /mcp/ triggers FastMCP's 307 redirect to /mcp; keeping
+    # the URL redirect-free avoids that hop entirely.
+    url: 'http://host.docker.internal:9000/mcp'
+    headers:
+      Authorization: 'Bearer ${MCP_BEARER_TOKEN}'
+    timeout: 60000
+    # Without this, LibreChat auto-probes the server WITHOUT the headers above to
+    # detect whether OAuth is needed. Our server (StaticTokenVerifier) answers that
+    # unauthenticated probe with 401 + `WWW-Authenticate: Bearer`, which LibreChat
+    # misreads as "OAuth required" and then never tries the static header at all
+    # (logs showed "OAuth Required: true" / "0 tools" even though a manual
+    # `wget --header="Authorization: Bearer ..."` against the same URL succeeds
+    # cleanly). This flag skips that probe and just uses the header above.
+    requiresOAuth: false
+
+endpoints:
+  custom:
+    - name: 'OpenRouter'
+      apiKey: '${OPENROUTER_KEY}'
+      baseURL: 'https://openrouter.ai/api/v1'
+      headers:
+        x-librechat-body-parentmessageid: '{{LIBRECHAT_BODY_PARENTMESSAGEID}}'
+      models:
+        # openai/gpt-oss-20b:free supports tool calling and is what evals/runner.py
+        # uses too — pick any other tool-capable OpenRouter model in the UI freely,
+        # this is just the default. dropParams below is needed for free models,
+        # which reject the `stop` param some clients send by default.
+        default: ['openai/gpt-oss-20b:free']
+        fetch: true
+      titleConvo: true
+      titleModel: 'openai/gpt-oss-20b:free'
+      dropParams: ['stop']
+      modelDisplayLabel: 'OpenRouter'
