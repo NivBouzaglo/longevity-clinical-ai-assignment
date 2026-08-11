@@ -233,25 +233,46 @@ one eval case of your own per the checklist above.
 ## Phase 5 — LibreChat wiring
 Lowest signal, highest friction (Docker + SSRF). Time-box this.
 
-- [ ] Copy `librechat.example.yaml` → `librechat.yaml`, fill in the `mcpServers`
-  block pointing at `http://host.docker.internal:9000/mcp/` (trailing slash!)
-  and the bearer token
-- [ ] Set `allowedAddresses` so LibreChat's SSRF guard allows `host.docker.internal`
-- [ ] `librechat/docker-compose.override.yml` to avoid the MongoDB crash-loop
-- [ ] Set `CREDS_KEY`/`CREDS_IV`/`JWT_SECRET`/`JWT_REFRESH_SECRET` per `librechat/env.notes.md`
-- [ ] Set `OPENROUTER_KEY`, pick a **tool-calling-capable** model
-- [ ] Boot LibreChat via Docker, confirm MCP server shows "connected" **and tools
-  actually fire** (not just connected)
+- [x] Copy `librechat.example.yaml` → `librechat.yaml`, fill in the `mcpServers`
+  block pointing at `http://host.docker.internal:9000/mcp` (**no** trailing
+  slash — see the trap noted below) and the bearer token
+- [x] Set `allowedAddresses` so LibreChat's SSRF guard allows `host.docker.internal`
+- [x] MongoDB — not needed: `mongo:8.0.20` (this version's default in
+  `deploy-compose.yml`) started clean, no crash-loop, override wasn't required
+- [x] Set `CREDS_KEY`/`CREDS_IV`/`JWT_SECRET`/`JWT_REFRESH_SECRET` (generated
+  fresh, not the committed example values) + `ADMIN_PANEL_SESSION_SECRET`
+  (undocumented in `env.notes.md` but required by this version's admin-panel
+  container — it crash-looped without it, fixed)
+- [x] Set `OPENROUTER_KEY` (reused the same key `evals/harness.py` uses),
+  default model `openai/gpt-oss-20b:free` (same as the eval harness, tool-calling
+  capable, `fetch: true` still lets the UI pick any other OpenRouter model)
+- [x] Boot LibreChat via Docker — all 7 containers healthy — confirm MCP server
+  shows "connected" **and tools actually fire** (not just connected)
+  ✅ **2026-08-11**: hit exactly the failure mode this checklist item warns
+  about (`OAuth Required: true`, `0 tools`), root-caused it, fixed it. See
+  `librechat/SETUP.md` trap 6 for the full story: LibreChat auto-probes the
+  server WITHOUT configured headers to detect OAuth, our `StaticTokenVerifier`
+  correctly 401s that unauthenticated probe with a `WWW-Authenticate: Bearer`
+  header, and LibreChat misread that as "OAuth required" — never trying the
+  configured static header at all. Fixed with `requiresOAuth: false`. Verified
+  via the API container's own startup logs: `Tools: ping,
+  get_current_biomarkers, get_current_risks` / `OAuth Required: false`.
 - [ ] End-to-end check: ask *"What are Avraham Friedman's (P004) current risks,
   and how has his kidney risk trended?"* → grounded answer, real values, worsening
-  CKD trend
+  CKD trend — **handed off to the user** (browser interaction, not automatable
+  from here). LibreChat is fully configured and MCP tools are confirmed
+  registered server-side; this is the last manual step: register an account at
+  http://localhost:3080, pick the OpenRouter endpoint, enable the MCP server's
+  tools in the chat, ask the question above.
 
 **Done when:** the checklist question above gets a correct, grounded answer in
-the LibreChat UI.
+the LibreChat UI. **Config + infra done and verified at the server level; the
+final "watch it answer correctly in the browser" step is on the user.**
 
 **Fallback if this fights you:** stub/script the agent→tool path instead and
 make sure Phase 4's evals hit the model + MCP tools directly — that's where the
-grading looks anyway.
+grading looks anyway. *(Not needed — this phase succeeded, including working
+through its hardest documented trap.)*
 
 ---
 
