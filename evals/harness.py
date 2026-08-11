@@ -33,8 +33,11 @@ Design choices
 from __future__ import annotations
 
 import asyncio
+import dataclasses
+import json
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -49,7 +52,14 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from evals.runner import discover_tool_schemas, make_judge_fn, run_case  # noqa: E402
-from evals.scoring import Case, Trace, format_report, load_cases, score_suite  # noqa: E402
+from evals.scoring import (  # noqa: E402
+    Case,
+    SuiteResult,
+    Trace,
+    format_report,
+    load_cases,
+    score_suite,
+)
 
 load_dotenv(REPO_ROOT / ".env")
 
@@ -143,7 +153,50 @@ def main() -> int:
     judge_fn = make_judge_fn(OPENROUTER_JUDGE_MODEL, OPENROUTER_API_KEY)
     suite = score_suite(cases, traces, judge_fn=judge_fn)
     print(format_report(suite))
+
+    run_path = _dump_run(traces, suite)
+    print(f"\nFull run detail (every tool call, reasoning, and answer): {run_path}", file=sys.stderr)
     return 0
+
+
+def _dump_run(traces: dict[str, Trace], suite: SuiteResult) -> Path:
+    """Persist the full run — every case's trace (tool calls, reasoning,
+    final answer) and scoring detail — to a timestamped JSON file.
+
+    `format_report`'s printed summary only lists failures; this captures
+    everything, including passing cases' tool calls and the raw model
+    reasoning, so a run can be inspected after the fact rather than only
+    trusting the pass/fail line. Gitignored (a run artifact, not source —
+    same reasoning as `models/mlflow_risk_router/`).
+    """
+    runs_dir = REPO_ROOT / "evals" / "runs"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    path = runs_dir / f"{stamp}.json"
+
+    data = {
+        "timestamp_utc": stamp,
+        "model": OPENROUTER_MODEL,
+        "judge_model": OPENROUTER_JUDGE_MODEL,
+        "overall": {"passed": suite.passed, "total": suite.total, "pass_rate": suite.pass_rate},
+        "by_category": {
+            cat: {"passed": s.passed, "total": s.total} for cat, s in sorted(suite.by_category.items())
+        },
+        "cases": [
+            {
+                "id": result.case_id,
+                "category": result.category,
+                "question": result.question,
+                "passed": result.passed,
+                "trace": dataclasses.asdict(traces[result.case_id]) if result.case_id in traces else None,
+                "tool_selection": dataclasses.asdict(result.tool_selection),
+                "fact_results": [dataclasses.asdict(fr) for fr in result.fact_results],
+            }
+            for result in suite.case_results
+        ],
+    }
+    path.write_text(json.dumps(data, indent=2, default=str))
+    return path
 
 
 if __name__ == "__main__":

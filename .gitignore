@@ -24,6 +24,10 @@ mlflow.db
 # worth the repo bloat or drift risk of a checked-in binary.
 models/mlflow_risk_router/
 
+# evals/harness.py run artifacts (full per-case trace dumps) — not source,
+# and contain a live model's raw output; regenerate with `make eval`.
+evals/runs/
+
 # Editors / OS
 .DS_Store
 .vscode/
