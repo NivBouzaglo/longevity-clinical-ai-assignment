@@ -35,3 +35,4 @@ evals/runs/
 
 # Claude Code local (machine-specific, never shared)
 .claude/settings.local.json
+.claude/scheduled_tasks.lock
