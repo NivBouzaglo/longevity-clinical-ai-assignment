@@ -14,8 +14,9 @@ See mcp-server/README.md / repo GUIDE.md §6 for how to start them.
 
 Design choices
 --------------
-* **Sequential, not concurrent, case execution.** This is a 13-case eval set,
-  not a load test. Running cases one at a time keeps progress output linear
+* **Sequential, not concurrent, case execution.** This is a small eval set
+  (see `evals/cases.jsonl`), not a load test. Running cases one at a time
+  keeps progress output linear
   (one case's tool calls don't interleave with another's in the logs) and
   avoids bursting concurrent requests at OpenRouter's rate limits or the
   single shared MLflow model server. `asyncio.gather` would trade that

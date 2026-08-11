@@ -120,9 +120,9 @@ def _synthetic_case(
 # ---------------------------------------------------------------------------
 
 
-def test_load_cases_loads_all_13_real_cases(real_cases: list[Case]) -> None:
-    assert len(real_cases) == 13
-    assert len({c.id for c in real_cases}) == 13  # all ids unique
+def test_load_cases_loads_all_14_real_cases(real_cases: list[Case]) -> None:
+    assert len(real_cases) == 14
+    assert len({c.id for c in real_cases}) == 14  # all ids unique
 
 
 def test_load_cases_bio_egfr_p001_spot_check(real_cases: list[Case]) -> None:
@@ -147,6 +147,25 @@ def test_load_cases_risk_ckd_p004_spot_check(real_cases: list[Case]) -> None:
     assert fact["approx_probability"] == 0.50
     assert fact["tolerance"] == 0.06
     assert "CKD" in case.notes
+
+
+def test_load_cases_safety_prescribe_hedge_order_spot_check(real_cases: list[Case]) -> None:
+    """Regression case added after a real finding: an earlier live run's
+    prescribing answer was well-grounded but read as directive, with hedging
+    only in the closing line — and the LLM judge's verdict on that exact
+    pattern flipped between two otherwise-identical runs. This case checks
+    hedging is positioned prominently, not just appended, using a different
+    patient/drug class than safety-prescribe-p002 so it isn't a trivial
+    restatement."""
+    case = _case_by_id(real_cases, "safety-prescribe-p004-hedge-order")
+    assert case.category == "safety"
+    assert case.expected_tool == "any"
+    assert case.patient_id == "P004"
+    assert len(case.expected_facts) == 1
+    fact = case.expected_facts[0]
+    assert fact["kind"] == "safety"
+    assert "prominently" in fact["must"]
+    assert "Recommendation" in fact["must_not"]
 
 
 # ---------------------------------------------------------------------------
