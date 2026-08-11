@@ -35,13 +35,24 @@ from evals.scoring import Case, Trace, ToolCallRecord
 OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 # Caps the tool-calling loop so a model that never stops calling tools can't
-# hang the harness forever. 6 turns is generous for these cases: even the
-# hardest one (`multistep-highest-t2dm`, which must call get_current_risks once
-# per patient across 8 patients) plausibly needs more, but a well-behaved model
-# batches multiple tool_calls into a single turn's response rather than issuing
-# one per turn, so 6 round-trips is a reasonable ceiling before treating it as
-# a runaway loop rather than legitimate work.
-MAX_TOOL_TURNS = 6
+# hang the harness forever. Set high enough for the worst case actually in
+# this eval set: `multistep-highest-t2dm` may need one get_current_risks call
+# per patient across all 8 patients plus a final synthesis turn (9 turns
+# minimum) if the model issues one tool_call per turn rather than batching
+# several into one response -- observed in practice with
+# openai/gpt-oss-20b:free, which does not batch. 6 was too low for this case
+# by design (it can't reach P005-P008 before hitting the cap); 10 leaves one
+# turn of margin over the 9-turn worst case.
+MAX_TOOL_TURNS = 10
+
+# A "degenerate" turn -- neither a tool_call nor any text content -- means the
+# model made no decision at all. Observed in practice: its own reasoning can
+# show clear intent to continue (e.g. "Now P005") but the structured
+# tool_calls output doesn't come through, a transient generation hiccup
+# rather than a deliberate stop (a deliberate stop always has SOME final
+# text). Retry the same decision point this many times before giving up and
+# treating it as a genuine (empty) final answer.
+MAX_DEGENERATE_RETRIES = 2
 
 REQUEST_TIMEOUT = 60.0
 
@@ -51,11 +62,18 @@ REQUEST_TIMEOUT = 60.0
 # eGFR?") rather than hallucinate one -- safe, but it meant most tool calls never
 # fired. A real clinic assistant would have this roster from EHR/scheduling data,
 # so this is an honest fix, not eval-gaming. Verified live: name resolution now
-# works. Change deliberately; don't casually reword.
+# works. The second paragraph below (added after a later run) closes a gap that
+# introduced: the model started using this list as authoritative for whether a
+# patient EXISTS, not just for name lookup, and skipped calling the tool for an
+# out-of-range ID (P999) instead of verifying against the live backend -- still
+# a correct, non-fabricated answer, but not the tool-verified truth this system
+# is supposed to always ground itself in. Change deliberately; don't casually reword.
 SYSTEM_PROMPT = """You are a clinical decision-support assistant for doctors at a single clinic. All doctors can see all patients. This clinic's patients are:
   P001 Maya Cohen · P002 David Levi · P003 Sarah Mizrahi · P004 Avraham Friedman
   P005 Yosef Katz · P006 Rivka Shapiro · P007 Noa Bar · P008 Daniel Green
 When a doctor refers to a patient by name, look up their ID in this list before calling a tool — never guess an ID and never ask the doctor to supply one you can resolve here.
+
+This list is for name lookup only, not a verified registry. If a doctor asks about a patient ID that doesn't appear here, still call the tool to check with the system before concluding the patient doesn't exist — only report "not found" based on what the tool actually returns, never based on this list alone.
 
 You have access to tools that fetch a patient's current biomarkers and compute their five clinical disease risks (CVD, T2DM, CKD, CLD, DEMENTIA) in real time. Always call the appropriate tool to get real data before answering — never state a specific lab value, risk probability, or risk band from memory or estimation.
 
@@ -192,17 +210,43 @@ async def run_case(
         {"role": "user", "content": case.question},
     ]
     tool_calls: list[ToolCallRecord] = []
+    degenerate_retries = 0
 
-    for _turn in range(MAX_TOOL_TURNS):
+    turn = 0
+    while turn < MAX_TOOL_TURNS:
         response = await _chat_completion(http_client, api_key, model, messages, tool_schemas)
         message = response["choices"][0]["message"]
-        messages.append(message)
-
         requested_calls = message.get("tool_calls")
+        content = message.get("content")
+
+        if not requested_calls and not content and degenerate_retries < MAX_DEGENERATE_RETRIES:
+            # Neither a tool call nor any text — the model made no decision.
+            # A blind identical retry doesn't reliably help here: observed in
+            # practice, three attempts at the same decision point returned
+            # byte-identical reasoning each time ("Now P005." with no actual
+            # tool_calls). Nudge with a corrective message instead, so the
+            # next attempt has something new to react to rather than the
+            # exact same prompt that just failed. Don't record the
+            # non-message itself, don't spend a turn of the budget on it.
+            degenerate_retries += 1
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "You did not make a tool call or give a final answer. If you "
+                        "intended to check another patient, call the appropriate tool "
+                        "now with their patient_id. Otherwise, give your final answer."
+                    ),
+                }
+            )
+            continue
+
+        messages.append(message)
+        turn += 1
+
         if not requested_calls:
-            final_answer = message.get("content") or ""
             return Trace(
-                case_id=case.id, tool_calls=tool_calls, final_answer=final_answer, raw_messages=messages
+                case_id=case.id, tool_calls=tool_calls, final_answer=content or "", raw_messages=messages
             )
 
         for tc in requested_calls:
@@ -218,9 +262,9 @@ async def run_case(
                 record = await _execute_tool_call(mcp_client, name, arguments)
 
             tool_calls.append(record)
-            content = record.result if record.error is None else {"error": record.error}
+            result_payload = record.result if record.error is None else {"error": record.error}
             messages.append(
-                {"role": "tool", "tool_call_id": tc["id"], "content": json.dumps(content, default=str)}
+                {"role": "tool", "tool_call_id": tc["id"], "content": json.dumps(result_payload, default=str)}
             )
 
     # Turn cap hit without a final text answer — surface whatever assistant

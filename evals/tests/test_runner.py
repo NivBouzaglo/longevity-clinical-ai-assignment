@@ -38,8 +38,10 @@ from fastmcp.client.auth import BearerAuth
 
 from evals.harness import MCP_BEARER_TOKEN, MCP_URL
 from evals.runner import (
+    MAX_DEGENERATE_RETRIES,
     MAX_RETRIES,
     MAX_TOOL_TURNS,
+    SYSTEM_PROMPT,
     _chat_completion,
     discover_tool_schemas,
     make_judge_fn,
@@ -111,6 +113,18 @@ def _tool_call_message(calls: list[tuple[str, str, dict]]) -> dict:
 
 def _final_answer_message(text: str) -> dict:
     return {"choices": [{"message": {"role": "assistant", "content": text}}]}
+
+
+def _degenerate_message() -> dict:
+    """An assistant turn with neither a tool call nor any text — the shape
+    observed from openai/gpt-oss-20b:free mid-way through a long multi-turn
+    task, where its reasoning showed intent to continue but the model failed
+    to actually emit the next tool_calls structure."""
+    return {
+        "choices": [
+            {"message": {"role": "assistant", "content": None, "reasoning": "Now P005."}}
+        ]
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -353,6 +367,71 @@ async def test_run_case_stops_at_max_tool_turns_without_hanging(
         for m in trace.raw_messages
         if isinstance(m.get("content"), str)
     )
+
+
+async def test_run_case_retries_a_degenerate_turn_then_recovers(
+    mcp_client: Client, tool_schemas: list[dict], http_client: httpx.AsyncClient
+) -> None:
+    """A turn with neither a tool call nor text (a real generation glitch
+    observed from openai/gpt-oss-20b:free) is retried, not treated as a
+    premature 'the model is done' signal."""
+    case = _synthetic_case()
+    responses = [
+        _degenerate_message(),
+        _tool_call_message([("call_1", "get_current_biomarkers", {"patient_id": "P001"})]),
+        _final_answer_message("All good."),
+    ]
+    mock_chat = AsyncMock(side_effect=responses)
+
+    with patch("evals.runner._chat_completion", new=mock_chat):
+        trace = await run_case(
+            case, mcp_client, tool_schemas, api_key="k", model="m", http_client=http_client
+        )
+
+    assert mock_chat.call_count == 3
+    assert trace.final_answer == "All good."
+    assert len(trace.tool_calls) == 1
+    # the degenerate turn must never be recorded into the transcript
+    assert not any(m.get("reasoning") == "Now P005." for m in trace.raw_messages)
+    # a corrective nudge WAS recorded, so the retry isn't just an identical resend
+    assert any(
+        m.get("role") == "user" and "did not make a tool call" in m.get("content", "")
+        for m in trace.raw_messages
+    )
+
+
+async def test_run_case_gives_up_after_max_degenerate_retries(
+    mcp_client: Client, tool_schemas: list[dict], http_client: httpx.AsyncClient
+) -> None:
+    """Persistent degenerate turns eventually give up with an empty final
+    answer rather than retrying forever."""
+    case = _synthetic_case()
+    mock_chat = AsyncMock(return_value=_degenerate_message())
+
+    with patch("evals.runner._chat_completion", new=mock_chat):
+        trace = await run_case(
+            case, mcp_client, tool_schemas, api_key="k", model="m", http_client=http_client
+        )
+
+    # MAX_DEGENERATE_RETRIES retries + 1 final acceptance
+    assert mock_chat.call_count == MAX_DEGENERATE_RETRIES + 1
+    assert trace.final_answer == ""
+    assert trace.tool_calls == []
+    # one nudge per retry, since the mock never reacts to it either
+    nudge_count = sum(
+        1
+        for m in trace.raw_messages
+        if m.get("role") == "user" and "did not make a tool call" in m.get("content", "")
+    )
+    assert nudge_count == MAX_DEGENERATE_RETRIES
+
+
+def test_system_prompt_requires_tool_verification_over_the_roster() -> None:
+    """Regression test for the safety-unknown-p999 finding: the roster is for
+    name lookup, not a substitute for verifying via the tool that a patient
+    genuinely doesn't exist."""
+    assert "not a verified registry" in SYSTEM_PROMPT
+    assert "still call the tool" in SYSTEM_PROMPT
 
 
 # ---------------------------------------------------------------------------
