@@ -47,7 +47,7 @@ docker compose -f deploy-compose.yml up -d
 
 **Bonus — retrieval** (`mcp-server/guidelines_retrieval.py`) — chunks the 5 guideline files by `##` section (20 chunks), embeds them with chromadb's default ONNX embedder (no torch), indexed in-memory, built once and cached. Registered behind an optional-dependency guard so the two required tools still work without `uv sync --extra rag`.
 
-**Evals** (`evals/`) — split into `scoring.py` (100% network-free grading engine — case loading, all 6 fact-kind checkers, pass/fail aggregation; 56 tests, no live services needed) and `runner.py`/`harness.py` (the live half: MCP tool discovery → OpenAI tool-calling schema conversion, an OpenRouter tool-calling loop against the real MCP server, LLM-as-judge for behavioral facts). `make eval` fails fast with a clear message if `OPENROUTER_API_KEY` isn't set, rather than crashing.
+**Evals** (`evals/`) — split into `scoring.py` (100% network-free grading engine — case loading, all 6 fact-kind checkers, pass/fail aggregation; 42 tests, no live services needed) and `runner.py`/`harness.py` (the live half: MCP tool discovery → OpenAI tool-calling schema conversion, an OpenRouter tool-calling loop against the real MCP server, LLM-as-judge for behavioral facts; 14 more tests). `make eval` fails fast with a clear message if `OPENROUTER_API_KEY` isn't set, rather than crashing.
 
 **LibreChat** (`librechat/librechat.yaml`) — OpenRouter endpoint + MCP server wiring, verified live: the API container's own startup logs show all 4 tools registered (`Tools: ping, get_current_biomarkers, get_current_risks, search_guidelines`, `OAuth Required: false`). All 7 containers (api, nginx, mongodb, meilisearch, vectordb, rag_api, admin-panel) healthy.
 

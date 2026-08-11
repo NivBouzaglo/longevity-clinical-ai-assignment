@@ -22,6 +22,7 @@ Add/edit these in LibreChat's `.env`:
 |---|---|---|
 | `OPENROUTER_KEY` | present but **commented out** — uncomment it | the OpenRouter API key you were given |
 | `MCP_BEARER_TOKEN` | **not present — add a new line** | **the same token as this repo's `.env`** — `librechat.yaml` sends it as `Authorization: Bearer` to your MCP server, so they must match |
+| `ADMIN_PANEL_SESSION_SECRET` | present but **empty** | **any random string ≥32 chars** (e.g. `openssl rand -hex 32`) — found the hard way: this LibreChat version's bundled `admin-panel` container (part of `deploy-compose.yml`) crash-loops with `SESSION_SECRET must be set to at least 32 characters (got 0). Refusing to start.` if left blank. Not related to the assignment's core chat/MCP path, but leaving it empty means one of your 7 containers sits in a restart loop. |
 
 `MCP_BEARER_TOKEN` is a **custom variable** — LibreChat has no idea what it is, and you
 won't find it in `.env.example`. That's fine: `deploy-compose.yml` loads the whole
