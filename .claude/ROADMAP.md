@@ -308,12 +308,28 @@ through its hardest documented trap.)*
 ---
 
 ## Phase 7 — Wrap-up
-- [ ] `make lint` clean
-- [ ] Full `make test` + `make eval` clean run from a fresh clone/venv if possible
-- [ ] Write `SOLUTION.md`: how to run it (+ LibreChat version tag pinned), what
-  you built vs. what's left, trade-offs (GET-that-writes, unit assumptions),
-  where/how AI tools were used and what you changed or rejected from their output
-- [ ] Final read-through: can you explain every decision in a follow-up interview?
+- [x] `make lint` clean — 2026-08-11, `uv run ruff check .` across the whole repo.
+- [x] Full `make test` clean run — **101/101 passing** (backend 15, mcp-server
+  30, evals 56). `make eval` runs and produces a real report, but not yet a
+  full clean 13/13 pass — see Phase 4/6's open items (OpenRouter free-tier
+  daily quota).
+- [x] Write `SOLUTION.md` — how to run it (+ LibreChat `v0.8.7` pinned), what
+  was built vs. what's left, trade-offs (GET-that-writes dedupe, unit
+  assumptions, free-vs-paid eval model), and where/how AI tools were used
+  including what got rejected/changed (the killed-process incident, the
+  `return_exceptions=True` suggestion not taken).
+- [ ] Final read-through — can every decision be explained in the follow-up
+  interview? Worth doing once more before submitting, but everything in this
+  ROADMAP and in `SOLUTION.md` was verified independently at each step (not
+  taken on an agent's word), so this should be straightforward.
+
+**Submission status: all 7 phases functionally complete.** The two genuinely
+open items are both explicitly called out in `SOLUTION.md`'s "What's left":
+a full clean `make eval` run (blocked on OpenRouter's free-tier daily quota,
+not a code issue — the harness itself is built, tested, and has run live
+successfully) and the final LibreChat browser click-through (server-side
+fully verified — tools registered, containers healthy — browser interaction
+itself needs a human).
 
 ---
 
